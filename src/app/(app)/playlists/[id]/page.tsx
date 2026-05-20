@@ -3,6 +3,9 @@ import { redirect, notFound } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/enums";
 import PlaylistEditor from "./PlaylistEditor";
+import { importPlaylistFromOptiSigns } from "@/lib/import-playlist";
+
+export const dynamic = "force-dynamic";
 
 export default async function PlaylistPage({ params }: { params: { id: string } }) {
   const session = await readSession();
@@ -30,15 +33,35 @@ export default async function PlaylistPage({ params }: { params: { id: string } 
     include: { items: { orderBy: { sortOrder: "asc" } } },
   });
 
+  // First open: no DRAFT yet. Try to seed it from the live OptiSigns playlist
+  // so the client lands on the real content instead of an empty list. If
+  // OptiSigns errors (network / schema mismatch) we fall back to an empty
+  // DRAFT so the editor still loads.
+  let autoImportError: string | null = null;
   if (!draft) {
-    draft = await prisma.playlistDraft.create({
-      data: {
+    try {
+      const r = await importPlaylistFromOptiSigns({
         clientId: mapping.clientId,
         optisignsPlaylistId,
-        status: "DRAFT",
-      },
-      include: { items: { orderBy: { sortOrder: "asc" } } },
-    });
+        byUserId: session.userId,
+      });
+      draft = await prisma.playlistDraft.findUnique({
+        where: { id: r.draftId },
+        include: { items: { orderBy: { sortOrder: "asc" } } },
+      });
+    } catch (err) {
+      autoImportError = err instanceof Error ? err.message : "OptiSigns import failed";
+    }
+    if (!draft) {
+      draft = await prisma.playlistDraft.create({
+        data: {
+          clientId: mapping.clientId,
+          optisignsPlaylistId,
+          status: "DRAFT",
+        },
+        include: { items: { orderBy: { sortOrder: "asc" } } },
+      });
+    }
   }
 
   const assets = await prisma.assetReference.findMany({
@@ -80,6 +103,7 @@ export default async function PlaylistPage({ params }: { params: { id: string } 
         type: a.type,
         thumbnailUrl: a.thumbnailUrl,
       }))}
+      autoImportError={autoImportError}
     />
   );
 }

@@ -1,35 +1,16 @@
 // POST /api/admin/optisigns/import
 //
-// Pulls a playlist from OptiSigns into the local environment.
-//
-// Body: {
-//   clientId: string,
-//   optisignsPlaylistId: string,
-//   optisignsScreenId?: string,
-//   optisignsScreenName?: string,
-//   canPublishDirectly?: boolean,
-// }
-//
-// What it does:
-//   1. Fetches the playlist from OptiSigns over GraphQL (no auth ever
-//      leaves the server).
-//   2. Upserts an OptiSignsMapping row for (client, playlist).
-//   3. For each unique asset referenced by the playlist, upserts an
-//      AssetReference row so the client can keep using those assets in
-//      the editor.
-//   4. Removes any existing local DRAFT for this (client, playlist)
-//      and replaces it with a fresh DRAFT pre-loaded with every item.
-//      Each item carries its `optisignsPlaylistItemId`, so the next
-//      publish-diff will issue updates instead of duplicate adds.
-//   5. Writes an audit log entry.
+// Pulls a playlist from OptiSigns into the local environment for a client.
+// Upserts the OptiSignsMapping, creates AssetReference rows for every
+// referenced asset, and seeds a local DRAFT (replacing any existing one)
+// pre-linked via optisignsPlaylistItemId for clean publish-diffing.
 
 import { NextRequest } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/rbac";
-import { audit } from "@/lib/audit";
 import { fail, handle, ok } from "@/lib/http";
-import { Playlists } from "@/lib/optisigns";
+import { importPlaylistFromOptiSigns } from "@/lib/import-playlist";
 
 const bodySchema = z.object({
   clientId: z.string().min(1),
@@ -38,15 +19,6 @@ const bodySchema = z.object({
   optisignsScreenName: z.string().optional(),
   canPublishDirectly: z.boolean().optional().default(false),
 });
-
-function inferType(raw?: string | null): "IMAGE" | "VIDEO" | "WEBSITE" | "URL" | "UNKNOWN" {
-  if (!raw) return "UNKNOWN";
-  const t = raw.toUpperCase();
-  if (t.includes("IMAGE")) return "IMAGE";
-  if (t.includes("VIDEO")) return "VIDEO";
-  if (t.includes("WEB") || t.includes("URL")) return "WEBSITE";
-  return "UNKNOWN";
-}
 
 export async function POST(req: NextRequest) {
   return handle(async () => {
@@ -58,147 +30,75 @@ export async function POST(req: NextRequest) {
     const client = await prisma.client.findUnique({ where: { id: input.clientId } });
     if (!client) return fail(404, "Client not found");
 
-    // 1. Pull the playlist from OptiSigns. Any GraphQL error bubbles up to
-    //    the user with the upstream message.
-    let remote;
+    // Refuse if this playlist is mapped to another client (unique constraint
+    // would also catch it, but a friendly 409 is better than a 500).
+    const playlistInUse = await prisma.optiSignsMapping.findUnique({
+      where: { optisignsPlaylistId: input.optisignsPlaylistId },
+      include: { client: { select: { id: true, companyName: true } } },
+    });
+    if (playlistInUse && playlistInUse.clientId !== input.clientId) {
+      return fail(
+        409,
+        `That OptiSigns playlist is already assigned to ${playlistInUse.client.companyName}.`
+      );
+    }
+
+    // 1. Upsert the mapping for (this client, this playlist).
+    let mapping;
     try {
-      remote = await Playlists.getPlaylist(input.optisignsPlaylistId);
+      mapping = await prisma.optiSignsMapping.upsert({
+        where: {
+          clientId_optisignsPlaylistId: {
+            clientId: input.clientId,
+            optisignsPlaylistId: input.optisignsPlaylistId,
+          },
+        },
+        create: {
+          clientId: input.clientId,
+          optisignsPlaylistId: input.optisignsPlaylistId,
+          optisignsScreenId: input.optisignsScreenId,
+          optisignsScreenName: input.optisignsScreenName,
+          canPublishDirectly: input.canPublishDirectly,
+        },
+        update: {
+          optisignsScreenId: input.optisignsScreenId ?? undefined,
+          optisignsScreenName: input.optisignsScreenName ?? undefined,
+          canPublishDirectly: input.canPublishDirectly,
+        },
+      });
+    } catch (err) {
+      return fail(409, "OptiSigns playlist or screen is already linked elsewhere");
+    }
+
+    // 2. Pull the playlist content via the shared helper.
+    let result;
+    try {
+      result = await importPlaylistFromOptiSigns({
+        clientId: input.clientId,
+        optisignsPlaylistId: input.optisignsPlaylistId,
+        byUserId: session.userId,
+      });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "OptiSigns request failed";
       return fail(502, `OptiSigns: ${msg}`);
     }
-    if (!remote) return fail(404, `OptiSigns has no playlist with id ${input.optisignsPlaylistId}`);
 
-    // OptiSigns stores playlist items on Playlist.assets (each is a
-    // PlaylistItem with assetRootId pointing back to the source Asset).
-    const items = remote.assets ?? [];
-
-    // 2. Mapping
-    const mapping = await prisma.optiSignsMapping.upsert({
-      where: {
-        clientId_optisignsPlaylistId: {
-          clientId: input.clientId,
-          optisignsPlaylistId: input.optisignsPlaylistId,
-        },
-      },
-      create: {
-        clientId: input.clientId,
-        optisignsPlaylistId: input.optisignsPlaylistId,
-        optisignsPlaylistName: remote.name ?? null,
-        optisignsScreenId: input.optisignsScreenId,
-        optisignsScreenName: input.optisignsScreenName,
-        canPublishDirectly: input.canPublishDirectly,
-      },
-      update: {
-        optisignsPlaylistName: remote.name ?? undefined,
-        optisignsScreenId: input.optisignsScreenId ?? undefined,
-        optisignsScreenName: input.optisignsScreenName ?? undefined,
-        canPublishDirectly: input.canPublishDirectly,
-      },
-    });
-
-    // 3. Asset references — upsert one per unique asset.
-    //    The source-asset link on a PlaylistItem is `assetRootId`. If it's
-    //    null we fall back to the PlaylistItem _id so the row still has a
-    //    stable handle (rare; happens for ad-hoc website items).
-    const seen = new Set<string>();
-    let assetsCreated = 0;
-    for (const item of items) {
-      const assetId = item.assetRootId ?? item._id;
-      if (!assetId || seen.has(assetId)) continue;
-      seen.add(assetId);
-      const title = item.filename?.trim() || `Asset ${assetId}`;
-      const type = inferType(item.type);
-      const before = await prisma.assetReference.findUnique({
-        where: {
-          clientId_optisignsAssetId: { clientId: input.clientId, optisignsAssetId: assetId },
-        },
+    // 3. Backfill the playlist name on the mapping if we just learned it.
+    if (result.playlistName && !mapping.optisignsPlaylistName) {
+      await prisma.optiSignsMapping.update({
+        where: { id: mapping.id },
+        data: { optisignsPlaylistName: result.playlistName },
       });
-      await prisma.assetReference.upsert({
-        where: {
-          clientId_optisignsAssetId: { clientId: input.clientId, optisignsAssetId: assetId },
-        },
-        create: {
-          clientId: input.clientId,
-          optisignsAssetId: assetId,
-          title,
-          type,
-          thumbnailUrl: item.thumbnail ?? null,
-          sourceUrl: item.webLink ?? null,
-          status: "APPROVED",
-        },
-        update: {
-          // Only fill blanks — don't clobber admin-edited titles/thumbs.
-          title: before?.title?.startsWith("Asset ") ? title : undefined,
-          type: before?.type === "UNKNOWN" ? type : undefined,
-          thumbnailUrl: before?.thumbnailUrl ? undefined : item.thumbnail ?? undefined,
-          sourceUrl: before?.sourceUrl ? undefined : item.webLink ?? undefined,
-        },
-      });
-      if (!before) assetsCreated++;
     }
-
-    // 4. Replace any existing DRAFT.
-    await prisma.playlistDraft.deleteMany({
-      where: {
-        clientId: input.clientId,
-        optisignsPlaylistId: input.optisignsPlaylistId,
-        status: "DRAFT",
-      },
-    });
-
-    const draft = await prisma.playlistDraft.create({
-      data: {
-        clientId: input.clientId,
-        optisignsPlaylistId: input.optisignsPlaylistId,
-        status: "DRAFT",
-        items: {
-          create: items
-            .map((it, idx) => {
-              const assetId = it.assetRootId ?? it._id;
-              if (!assetId) return null;
-              return {
-                clientId: input.clientId,
-                optisignsPlaylistId: input.optisignsPlaylistId,
-                optisignsPlaylistItemId: it._id ?? null,
-                optisignsAssetId: assetId,
-                title: it.filename?.trim() || `Asset ${assetId}`,
-                type: inferType(it.type),
-                durationSeconds:
-                  typeof it.duration === "number" && it.duration > 0 ? Math.round(it.duration) : 10,
-                sortOrder: idx,
-                status: "ACTIVE",
-              };
-            })
-            .filter((x): x is NonNullable<typeof x> => x !== null),
-        },
-      },
-      include: { items: true },
-    });
-
-    // 5. Audit
-    await audit({
-      userId: session.userId,
-      clientId: input.clientId,
-      action: "PLAYLIST_IMPORTED",
-      entityType: "PlaylistDraft",
-      entityId: draft.id,
-      after: {
-        optisignsPlaylistId: input.optisignsPlaylistId,
-        playlistName: remote.name,
-        itemCount: draft.items.length,
-        assetsCreated,
-      },
-    });
 
     return ok({
       ok: true,
-      playlistName: remote.name ?? null,
+      playlistName: result.playlistName,
       mappingId: mapping.id,
-      draftId: draft.id,
-      itemCount: draft.items.length,
-      assetsCreated,
-      uniqueAssets: seen.size,
+      draftId: result.draftId,
+      itemCount: result.itemCount,
+      assetsCreated: result.assetsCreated,
+      uniqueAssets: result.uniqueAssets,
     });
   });
 }

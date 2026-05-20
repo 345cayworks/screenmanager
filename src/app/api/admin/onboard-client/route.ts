@@ -21,7 +21,7 @@ import { requireAdmin } from "@/lib/rbac";
 import { audit } from "@/lib/audit";
 import { fail, handle, ok } from "@/lib/http";
 import { issueSetupToken } from "@/lib/invitations";
-import { Playlists } from "@/lib/optisigns";
+import { importPlaylistFromOptiSigns } from "@/lib/import-playlist";
 
 const clientSchema = z.object({
   companyName: z.string().min(1).max(200),
@@ -57,15 +57,6 @@ const bodySchema = z.object({
   user: userSchema,
   mapping: mappingSchema,
 });
-
-function inferType(raw?: string | null): "IMAGE" | "VIDEO" | "WEBSITE" | "URL" | "UNKNOWN" {
-  if (!raw) return "UNKNOWN";
-  const t = raw.toUpperCase();
-  if (t.includes("IMAGE")) return "IMAGE";
-  if (t.includes("VIDEO")) return "VIDEO";
-  if (t.includes("WEB") || t.includes("URL")) return "WEBSITE";
-  return "UNKNOWN";
-}
 
 export async function POST(req: NextRequest) {
   return handle(async () => {
@@ -160,65 +151,12 @@ export async function POST(req: NextRequest) {
     let importResult: { itemCount: number; assetsCreated: number } | { error: string } | null = null;
     if (result.mapping && mIn?.importNow) {
       try {
-        const remote = await Playlists.getPlaylist(result.mapping.optisignsPlaylistId);
-        if (!remote) {
-          importResult = { error: "OptiSigns has no playlist with that id" };
-        } else {
-          const items = remote.assets ?? [];
-          let assetsCreated = 0;
-          const seen = new Set<string>();
-          for (const it of items) {
-            const assetId = it.assetRootId ?? it._id;
-            if (!assetId || seen.has(assetId)) continue;
-            seen.add(assetId);
-            const before = await prisma.assetReference.findUnique({
-              where: { clientId_optisignsAssetId: { clientId: result.client.id, optisignsAssetId: assetId } },
-            });
-            await prisma.assetReference.upsert({
-              where: { clientId_optisignsAssetId: { clientId: result.client.id, optisignsAssetId: assetId } },
-              create: {
-                clientId: result.client.id,
-                optisignsAssetId: assetId,
-                title: it.filename?.trim() || `Asset ${assetId}`,
-                type: inferType(it.type),
-                thumbnailUrl: it.thumbnail ?? null,
-                sourceUrl: it.webLink ?? null,
-                status: "APPROVED",
-              },
-              update: {},
-            });
-            if (!before) assetsCreated++;
-          }
-          const draft = await prisma.playlistDraft.create({
-            data: {
-              clientId: result.client.id,
-              optisignsPlaylistId: result.mapping.optisignsPlaylistId,
-              status: "DRAFT",
-              items: {
-                create: items
-                  .map((it, idx) => {
-                    const aid = it.assetRootId ?? it._id;
-                    if (!aid) return null;
-                    return {
-                      clientId: result.client.id,
-                      optisignsPlaylistId: result.mapping!.optisignsPlaylistId,
-                      optisignsPlaylistItemId: it._id ?? null,
-                      optisignsAssetId: aid,
-                      title: it.filename?.trim() || `Asset ${aid}`,
-                      type: inferType(it.type),
-                      durationSeconds:
-                        typeof it.duration === "number" && it.duration > 0 ? Math.round(it.duration) : 10,
-                      sortOrder: idx,
-                      status: "ACTIVE",
-                    };
-                  })
-                  .filter((x): x is NonNullable<typeof x> => x !== null),
-              },
-            },
-            include: { items: { select: { id: true } } },
-          });
-          importResult = { itemCount: draft.items.length, assetsCreated };
-        }
+        const r = await importPlaylistFromOptiSigns({
+          clientId: result.client.id,
+          optisignsPlaylistId: result.mapping.optisignsPlaylistId,
+          byUserId: session.userId,
+        });
+        importResult = { itemCount: r.itemCount, assetsCreated: r.assetsCreated };
       } catch (err) {
         importResult = { error: err instanceof Error ? err.message : "OptiSigns import failed" };
       }
