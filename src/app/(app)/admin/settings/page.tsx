@@ -2,6 +2,7 @@ import { readSession } from "@/lib/auth";
 import { redirect } from "next/navigation";
 import { isAdminRole } from "@/lib/enums";
 import { Card, PageHeader } from "@/components/ui";
+import ConnectionCheck from "./ConnectionCheck";
 
 export default async function SettingsPage() {
   const session = await readSession();
@@ -33,6 +34,7 @@ export default async function SettingsPage() {
         <p className="text-xs text-slate-500 mt-4">
           Configure these in Netlify environment variables (or .env locally). API key values are never displayed.
         </p>
+        <ConnectionCheck />
       </Card>
     </div>
   );

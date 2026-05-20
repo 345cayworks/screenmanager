@@ -20,19 +20,45 @@ export type PlaylistItemInput = {
   endDate?: string | null;
 };
 
+export type RemotePlaylistItem = {
+  _id: string;
+  assetId: string;
+  duration?: number | null;
+  // Optional enrichment — only populated when the server returns it.
+  asset?: { _id?: string; name?: string; type?: string; thumbnail?: string | null } | null;
+};
+
 export type RemotePlaylist = {
   _id: string;
   name?: string;
-  items?: Array<{
-    _id?: string;
-    assetId?: string;
-    duration?: number;
-  }>;
+  items: RemotePlaylistItem[];
 };
 
 // ---------- Queries ----------
 
-const GET_PLAYLIST = /* GraphQL */ `
+// Tries the richer query first (with nested asset metadata). If the server
+// rejects it (field doesn't exist), falls back to the minimal shape.
+const GET_PLAYLIST_RICH = /* GraphQL */ `
+  query GetPlaylist($id: ID!) {
+    playlist(_id: $id) {
+      _id
+      name
+      items {
+        _id
+        assetId
+        duration
+        asset {
+          _id
+          name
+          type
+          thumbnail
+        }
+      }
+    }
+  }
+`;
+
+const GET_PLAYLIST_MINIMAL = /* GraphQL */ `
   query GetPlaylist($id: ID!) {
     playlist(_id: $id) {
       _id
@@ -46,9 +72,48 @@ const GET_PLAYLIST = /* GraphQL */ `
   }
 `;
 
+const LIST_PLAYLISTS = /* GraphQL */ `
+  query ListPlaylists {
+    playlists {
+      _id
+      name
+      items {
+        _id
+      }
+    }
+  }
+`;
+
+export type RemotePlaylistSummary = {
+  _id: string;
+  name?: string;
+  items?: Array<{ _id?: string }>;
+};
+
+/**
+ * Lists every playlist visible to the current OptiSigns account. Used by the
+ * admin "browse & assign" UI. May need pagination once the catalog is large —
+ * extend the query with `limit` / `offset` when ready.
+ */
+export async function listPlaylists(): Promise<RemotePlaylistSummary[]> {
+  const data = await gqlRequest<{ playlists: RemotePlaylistSummary[] | null }>(LIST_PLAYLISTS);
+  return data.playlists ?? [];
+}
+
 export async function getPlaylist(playlistId: string): Promise<RemotePlaylist | null> {
-  const data = await gqlRequest<{ playlist: RemotePlaylist | null }>(GET_PLAYLIST, { id: playlistId });
-  return data.playlist ?? null;
+  try {
+    const data = await gqlRequest<{ playlist: RemotePlaylist | null }>(GET_PLAYLIST_RICH, {
+      id: playlistId,
+    });
+    return data.playlist ?? null;
+  } catch (err) {
+    // Fall back if the schema doesn't expose nested asset fields.
+    console.warn("[optisigns] rich playlist query failed, trying minimal:", err instanceof Error ? err.message : err);
+    const data = await gqlRequest<{ playlist: RemotePlaylist | null }>(GET_PLAYLIST_MINIMAL, {
+      id: playlistId,
+    });
+    return data.playlist ?? null;
+  }
 }
 
 // ---------- Mutations ----------
