@@ -95,13 +95,14 @@ export async function gqlRequest<T>(
     if (!res.ok) {
       console.error("[optisigns] HTTP error", res.status, json);
       // Recognize the classic "wrong path" mistake and give a directive hint.
-      const upstreamMsg = json.message || json.error || `HTTP ${res.status}`;
       if (res.status === 404 && /Cannot POST \//.test(String(json.message ?? ""))) {
         throw new OptiSignsError(
           `OptiSigns 404 at ${endpoint} — the URL is reachable but doesn't speak GraphQL at this path. Set OPTISIGNS_GRAPHQL_ENDPOINT to the full path including /graphql (e.g. https://graphql-gateway.optisigns.com/graphql).`,
           json
         );
       }
+      const gqlMsgs = json.errors?.map((e) => e.message).filter(Boolean).join("; ");
+      const upstreamMsg = gqlMsgs || json.message || json.error || `HTTP ${res.status}`;
       throw new OptiSignsError(`OptiSigns ${res.status} at ${endpoint}: ${upstreamMsg}`, json);
     }
 

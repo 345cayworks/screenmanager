@@ -7,8 +7,8 @@ type Result = {
   ok: boolean;
   endpoint: string;
   steps: { env: Step; reach: Step; auth: Step };
-  deviceCount: number | null;
-  sampleDeviceName: string | null;
+  queries: string[];
+  mutations: string[];
 };
 
 export default function ConnectionCheck() {
@@ -64,11 +64,27 @@ export default function ConnectionCheck() {
           <StepLine label="Endpoint reachable" step={result.steps.reach} />
           <StepLine label="API key accepted" step={result.steps.auth} />
           <div className="text-xs text-slate-500 mt-2 font-mono">{result.endpoint}</div>
-          {result.deviceCount !== null && (
-            <div className="text-xs text-slate-500">
-              {result.deviceCount} device(s) visible
-              {result.sampleDeviceName ? ` · e.g. "${result.sampleDeviceName}"` : ""}
-            </div>
+
+          {(result.queries.length > 0 || result.mutations.length > 0) && (
+            <details className="mt-3 text-xs">
+              <summary className="cursor-pointer text-slate-700 font-medium">
+                Schema discovered ({result.queries.length} queries, {result.mutations.length} mutations)
+              </summary>
+              <div className="grid grid-cols-2 gap-4 mt-2">
+                <div>
+                  <div className="text-slate-500 font-medium mb-1">Queries</div>
+                  <ul className="font-mono text-[11px] text-slate-700 space-y-0.5 max-h-64 overflow-y-auto">
+                    {result.queries.map((q) => <li key={q}>{q}</li>)}
+                  </ul>
+                </div>
+                <div>
+                  <div className="text-slate-500 font-medium mb-1">Mutations</div>
+                  <ul className="font-mono text-[11px] text-slate-700 space-y-0.5 max-h-64 overflow-y-auto">
+                    {result.mutations.map((m) => <li key={m}>{m}</li>)}
+                  </ul>
+                </div>
+              </div>
+            </details>
           )}
         </div>
       )}
