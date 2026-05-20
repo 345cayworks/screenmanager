@@ -10,7 +10,7 @@
 import { gqlRequest } from "./client";
 
 const GET_ASSETS = /* GraphQL */ `
-  query GetAssets($limit: Int, $teamId: ID) {
+  query GetAssets($limit: Int, $teamId: String) {
     assets(limit: $limit, teamId: $teamId) {
       _id
       name

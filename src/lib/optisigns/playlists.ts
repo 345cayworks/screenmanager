@@ -102,7 +102,7 @@ export async function listPlaylists(): Promise<RemotePlaylistSummary[]> {
 }
 
 const GET_PLAYLIST = /* GraphQL */ `
-  query GetPlaylist($id: ID!) {
+  query GetPlaylist($id: String!) {
     getPlaylistDetail(_id: $id) {
       _id
       name
@@ -168,7 +168,7 @@ export async function createOrUpdatePlaylist(payload: {
 }
 
 const ADD_PLAYLIST_ITEMS = /* GraphQL */ `
-  mutation AddPlaylistItems($playlistId: ID!, $items: [AddPlaylistItemInput!]!) {
+  mutation AddPlaylistItems($playlistId: String!, $items: [AddPlaylistItemInput!]!) {
     addPlaylistItems(playlistId: $playlistId, items: $items) {
       _id
     }
@@ -189,7 +189,7 @@ export async function addPlaylistItems(playlistId: string, items: PlaylistItemIn
 }
 
 const UPDATE_PLAYLIST_ITEMS = /* GraphQL */ `
-  mutation UpdatePlaylistItems($playlistId: ID!, $items: [UpdatePlaylistItemInput!]!) {
+  mutation UpdatePlaylistItems($playlistId: String!, $items: [UpdatePlaylistItemInput!]!) {
     updatePlaylistItems(playlistId: $playlistId, items: $items) {
       _id
     }
@@ -214,7 +214,7 @@ export async function updatePlaylistItems(
 }
 
 const REMOVE_PLAYLIST_ITEMS = /* GraphQL */ `
-  mutation RemovePlaylistItems($playlistId: ID!, $itemIds: [ID!]!) {
+  mutation RemovePlaylistItems($playlistId: String!, $itemIds: [String!]!) {
     removePlaylistItems(playlistId: $playlistId, itemIds: $itemIds) {
       _id
     }
