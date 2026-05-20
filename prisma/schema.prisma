@@ -10,13 +10,13 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
-// NOTE: SQLite doesn't support native enums, so we use string fields and
-// validate via TypeScript unions in src/lib/enums.ts. When switching to
-// Postgres you may convert these to native Prisma enums.
+// NOTE: Enum-like fields are stored as strings and validated via TypeScript
+// unions in src/lib/enums.ts. If you ever want native Postgres enums you can
+// convert them; the rest of the codebase won't need changes.
 
 model User {
   id        String   @id @default(cuid())

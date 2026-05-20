@@ -1,8 +1,12 @@
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth";
+import { ensureSuperAdmin } from "@/lib/bootstrap";
 import LoginForm from "./LoginForm";
 
 export default async function LoginPage() {
+  // First-run bootstrap: if no superadmin exists and SUPER_ADMIN_EMAIL +
+  // SUPERADMIN_MASTER_KEY are set, create the admin. No-op afterwards.
+  await ensureSuperAdmin();
   const s = await readSession();
   if (s) redirect("/dashboard");
   return (
