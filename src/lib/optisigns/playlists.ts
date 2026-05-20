@@ -36,11 +36,12 @@ export type RemotePlaylist = {
 
 // ---------- Queries ----------
 
-// Tries the richer query first (with nested asset metadata). If the server
-// rejects it (field doesn't exist), falls back to the minimal shape.
+// The tenant exposes `getPlaylistDetail`, not the bare `playlist(_id:)` field.
+// Try the richer shape first (nested asset metadata), fall back to minimal if
+// asset fields aren't supported.
 const GET_PLAYLIST_RICH = /* GraphQL */ `
   query GetPlaylist($id: ID!) {
-    playlist(_id: $id) {
+    getPlaylistDetail(_id: $id) {
       _id
       name
       items {
@@ -60,7 +61,7 @@ const GET_PLAYLIST_RICH = /* GraphQL */ `
 
 const GET_PLAYLIST_MINIMAL = /* GraphQL */ `
   query GetPlaylist($id: ID!) {
-    playlist(_id: $id) {
+    getPlaylistDetail(_id: $id) {
       _id
       name
       items {
@@ -162,17 +163,21 @@ export async function listPlaylists(): Promise<RemotePlaylistSummary[]> {
 
 export async function getPlaylist(playlistId: string): Promise<RemotePlaylist | null> {
   try {
-    const data = await gqlRequest<{ playlist: RemotePlaylist | null }>(GET_PLAYLIST_RICH, {
-      id: playlistId,
-    });
-    return data.playlist ?? null;
+    const data = await gqlRequest<{ getPlaylistDetail: RemotePlaylist | null }>(
+      GET_PLAYLIST_RICH,
+      { id: playlistId }
+    );
+    return data.getPlaylistDetail ?? null;
   } catch (err) {
-    // Fall back if the schema doesn't expose nested asset fields.
-    console.warn("[optisigns] rich playlist query failed, trying minimal:", err instanceof Error ? err.message : err);
-    const data = await gqlRequest<{ playlist: RemotePlaylist | null }>(GET_PLAYLIST_MINIMAL, {
-      id: playlistId,
-    });
-    return data.playlist ?? null;
+    console.warn(
+      "[optisigns] rich playlist query failed, trying minimal:",
+      err instanceof Error ? err.message : err
+    );
+    const data = await gqlRequest<{ getPlaylistDetail: RemotePlaylist | null }>(
+      GET_PLAYLIST_MINIMAL,
+      { id: playlistId }
+    );
+    return data.getPlaylistDetail ?? null;
   }
 }
 

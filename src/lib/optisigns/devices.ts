@@ -33,7 +33,10 @@ export async function assignPlaylistToDevice(deviceId: string, playlistId: strin
 // actual records under `.page`. We default to a large page size but expose
 // the option to paginate later.
 
-const GET_DEVICES = /* GraphQL */ `
+// We try the richest shape we think Device exposes, falling back through
+// progressively safer shapes if any field is rejected.
+
+const GET_DEVICES_RICH = /* GraphQL */ `
   query GetDevices($first: Int) {
     devices(first: $first) {
       page {
@@ -46,14 +49,23 @@ const GET_DEVICES = /* GraphQL */ `
   }
 `;
 
-const GET_DEVICES_NO_ARGS = /* GraphQL */ `
+const GET_DEVICES_BARE = /* GraphQL */ `
+  query GetDevices($first: Int) {
+    devices(first: $first) {
+      page {
+        _id
+        deviceName
+      }
+    }
+  }
+`;
+
+const GET_DEVICES_BARE_NO_ARGS = /* GraphQL */ `
   query GetDevices {
     devices {
       page {
         _id
         deviceName
-        currentType
-        currentAssetId
       }
     }
   }
@@ -66,16 +78,22 @@ export type RemoteDevice = {
   currentAssetId?: string;
 };
 
-export async function getDevices(): Promise<RemoteDevice[]> {
+async function attempt(query: string, variables?: Record<string, unknown>): Promise<RemoteDevice[] | null> {
   try {
-    const data = await gqlRequest<{ devices: { page: RemoteDevice[] } }>(GET_DEVICES, { first: 500 });
+    const data = await gqlRequest<{ devices: { page: RemoteDevice[] } }>(query, variables);
     return data.devices?.page ?? [];
   } catch (err) {
-    // Some schema variants reject the `first` arg — fall back to no-args.
-    if (err instanceof Error && /\$first|argument/i.test(err.message)) {
-      const data = await gqlRequest<{ devices: { page: RemoteDevice[] } }>(GET_DEVICES_NO_ARGS);
-      return data.devices?.page ?? [];
-    }
+    const msg = err instanceof Error ? err.message : "";
+    if (/Cannot query field|argument|\$first/i.test(msg)) return null;
     throw err;
   }
+}
+
+export async function getDevices(): Promise<RemoteDevice[]> {
+  return (
+    (await attempt(GET_DEVICES_RICH, { first: 500 })) ??
+    (await attempt(GET_DEVICES_BARE, { first: 500 })) ??
+    (await attempt(GET_DEVICES_BARE_NO_ARGS)) ??
+    []
+  );
 }
