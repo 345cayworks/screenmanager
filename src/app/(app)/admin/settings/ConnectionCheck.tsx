@@ -10,7 +10,7 @@ type TypeInfo = { name: string; fields: Field[] };
 type Result = {
   ok: boolean;
   endpoint: string;
-  steps: { env: Step; reach: Step; auth: Step };
+  steps: { env: Step; reach: Step; auth: Step; dataAccess?: Step };
   queries: RootField[];
   mutations: RootField[];
   typesOfInterest: TypeInfo[];
@@ -81,7 +81,10 @@ export default function ConnectionCheck() {
         <div className="mt-3 space-y-2">
           <StepLine label="Env vars" step={result.steps.env} />
           <StepLine label="Endpoint reachable" step={result.steps.reach} />
-          <StepLine label="API key accepted" step={result.steps.auth} />
+          <StepLine label="Schema accessible" step={result.steps.auth} />
+          {result.steps.dataAccess && (
+            <StepLine label="Data API enabled" step={result.steps.dataAccess} />
+          )}
           <div className="text-xs text-slate-500 mt-2 font-mono">{result.endpoint}</div>
 
           {(result.queries.length > 0 || result.typesOfInterest.length > 0) && (

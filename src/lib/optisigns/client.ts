@@ -10,7 +10,11 @@ const DEFAULT_ENDPOINT = "https://graphql-gateway.optisigns.com/graphql";
 
 export type GqlResponse<T> = {
   data?: T;
-  errors?: Array<{ message: string; path?: (string | number)[]; extensions?: unknown }>;
+  errors?: Array<{
+    message: string;
+    path?: (string | number)[];
+    extensions?: { code?: string; [key: string]: unknown };
+  }>;
 };
 
 export class OptiSignsError extends Error {
@@ -18,6 +22,37 @@ export class OptiSignsError extends Error {
     super(message);
     this.name = "OptiSignsError";
   }
+}
+
+/**
+ * Translate well-known OptiSigns error codes into actionable messages.
+ * Returns null if no special handling applies.
+ */
+function translateOptiSignsCode(
+  errors: Array<{ message?: string; extensions?: { code?: string } }>
+): string | null {
+  const codes = errors
+    .map((e) => (e.extensions?.code || "").toUpperCase())
+    .filter(Boolean);
+  const msgs = errors.map((e) => (e.message || "").toUpperCase());
+  const has = (token: string) =>
+    codes.some((c) => c.includes(token)) || msgs.some((m) => m.includes(token));
+
+  if (has("API_NOT_AVAILABLE")) {
+    return (
+      "OptiSigns reports this API endpoint isn't available for your account. " +
+      "This is usually because the OptiSigns API add-on isn't enabled on your plan, " +
+      "or the bearer token doesn't have permission for this operation. " +
+      "Check Settings → API in your OptiSigns dashboard."
+    );
+  }
+  if (has("UNAUTHENTICATED") || has("UNAUTHORIZED")) {
+    return "OptiSigns rejected the bearer token. Verify OPTISIGNS_API_KEY is current and active.";
+  }
+  if (has("FORBIDDEN")) {
+    return "OptiSigns refused this operation. The API key may lack permission for this resource.";
+  }
+  return null;
 }
 
 /**
@@ -101,6 +136,8 @@ export async function gqlRequest<T>(
           json
         );
       }
+      const friendly = translateOptiSignsCode(json.errors ?? []);
+      if (friendly) throw new OptiSignsError(friendly, json);
       const gqlMsgs = json.errors?.map((e) => e.message).filter(Boolean).join("; ");
       const upstreamMsg = gqlMsgs || json.message || json.error || `HTTP ${res.status}`;
       throw new OptiSignsError(`OptiSigns ${res.status} at ${endpoint}: ${upstreamMsg}`, json);
@@ -108,7 +145,11 @@ export async function gqlRequest<T>(
 
     if (json.errors && json.errors.length > 0) {
       console.error("[optisigns] GraphQL errors", json.errors);
-      throw new OptiSignsError(json.errors.map((e) => e.message).join("; "), json.errors);
+      const friendly = translateOptiSignsCode(json.errors);
+      throw new OptiSignsError(
+        friendly || json.errors.map((e) => e.message).join("; "),
+        json.errors
+      );
     }
 
     if (!json.data) throw new OptiSignsError("OptiSigns returned no data", json);

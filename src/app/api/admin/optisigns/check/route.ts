@@ -103,6 +103,7 @@ export async function GET() {
 
     let reach: Step = { ok: false, detail: "Not attempted" };
     let auth: Step = { ok: false, detail: "Not attempted" };
+    let dataAccess: Step = { ok: false, detail: "Not attempted" };
     let queries: Array<{ name: string; returns: string }> = [];
     let mutations: Array<{ name: string; returns: string }> = [];
     let typesOfInterest: Array<{ name: string; fields: Array<{ name: string; type: string }> }> = [];
@@ -142,12 +143,33 @@ export async function GET() {
           };
         }
       }
+
+      // Step 4 — data access. Introspection can succeed (schema visible) while
+      // OptiSigns still gates data-read endpoints behind the paid API add-on.
+      // Exercise a real list query to find out.
+      if (auth.ok) {
+        try {
+          const data = await gqlRequest<{ playlists: { page: { edges: unknown[] } } }>(
+            "query { playlists { page { edges { node { _id } } } } }"
+          );
+          const count = data.playlists?.page?.edges?.length ?? 0;
+          dataAccess = {
+            ok: true,
+            detail: `Playlist data accessible (${count} item(s) in this page)`,
+          };
+        } catch (err) {
+          dataAccess = {
+            ok: false,
+            detail: err instanceof Error ? err.message : "Data access failed",
+          };
+        }
+      }
     }
 
     return ok({
-      ok: env.ok && reach.ok && auth.ok,
+      ok: env.ok && reach.ok && auth.ok && dataAccess.ok,
       endpoint,
-      steps: { env, reach, auth },
+      steps: { env, reach, auth, dataAccess },
       queries,
       mutations,
       typesOfInterest,
