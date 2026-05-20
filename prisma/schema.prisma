@@ -19,14 +19,22 @@ datasource db {
 // convert them; the rest of the codebase won't need changes.
 
 model User {
-  id        String   @id @default(cuid())
-  name      String
-  email     String   @unique
-  passwordHash String
-  role      String   // SUPERADMIN | ADMIN | CLIENT_OWNER | CLIENT_EDITOR | VIEWER
-  status    String   @default("ACTIVE") // ACTIVE | INACTIVE
-  clientId  String?
-  client    Client?  @relation(fields: [clientId], references: [id])
+  id           String   @id @default(cuid())
+  name         String
+  email        String   @unique
+  // Nullable: invited users have no password until they consume the setup
+  // token and choose one.
+  passwordHash String?
+  role         String   // SUPERADMIN | ADMIN | CLIENT_OWNER | CLIENT_EDITOR | VIEWER
+  status       String   @default("ACTIVE") // ACTIVE | INACTIVE
+  clientId     String?
+  client       Client?  @relation(fields: [clientId], references: [id])
+
+  // One-time setup / password-reset token. We store a sha256 hash so a
+  // compromised DB doesn't leak working tokens. Cleared on consumption.
+  setupTokenHash      String?   @unique
+  setupTokenExpiresAt DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

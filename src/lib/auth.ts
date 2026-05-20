@@ -70,7 +70,29 @@ export function clearSessionCookie() {
 export async function login(email: string, password: string): Promise<SessionPayload | null> {
   const user = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
   if (!user || user.status !== "ACTIVE") return null;
+  // Invited users haven't set a password yet — they must complete the
+  // /setup-password flow before they can sign in.
+  if (!user.passwordHash) return null;
   if (!(await verifyPassword(password, user.passwordHash))) return null;
+  const payload: SessionPayload = {
+    userId: user.id,
+    email: user.email,
+    role: user.role as Role,
+    clientId: user.clientId,
+    name: user.name,
+  };
+  const token = await createSession(payload);
+  setSessionCookie(token);
+  return payload;
+}
+
+/**
+ * Sign in the given user without a password — used at the end of the
+ * setup-password flow after the user has just chosen and saved a password.
+ */
+export async function signInUser(userId: string): Promise<SessionPayload | null> {
+  const user = await prisma.user.findUnique({ where: { id: userId } });
+  if (!user || user.status !== "ACTIVE") return null;
   const payload: SessionPayload = {
     userId: user.id,
     email: user.email,

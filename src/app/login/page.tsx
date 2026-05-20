@@ -25,7 +25,9 @@ export default async function LoginPage() {
           <LoginForm />
         </div>
         <p className="text-xs text-slate-400 text-center mt-6">
-          Need access? Contact your account administrator.
+          First time here? Use the setup link your administrator sent you.
+          <br />
+          Forgot your password? Ask your administrator to send a new setup link.
         </p>
       </div>
     </div>
