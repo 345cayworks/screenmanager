@@ -33,7 +33,7 @@ export async function GET() {
         return {
           optisignsPlaylistId: p._id,
           name: p.name ?? null,
-          itemCount: p.items?.length ?? 0,
+          itemCount: p.itemCount,
           assignedClient: m?.client
             ? { id: m.client.id, name: m.client.companyName }
             : null,

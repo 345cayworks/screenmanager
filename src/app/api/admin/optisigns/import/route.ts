@@ -69,7 +69,9 @@ export async function POST(req: NextRequest) {
     }
     if (!remote) return fail(404, `OptiSigns has no playlist with id ${input.optisignsPlaylistId}`);
 
-    const items = remote.items ?? [];
+    // OptiSigns stores playlist items on Playlist.assets (each is a
+    // PlaylistItem with assetRootId pointing back to the source Asset).
+    const items = remote.assets ?? [];
 
     // 2. Mapping
     const mapping = await prisma.optiSignsMapping.upsert({
@@ -95,36 +97,42 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    // 3. Asset references — upsert one per unique assetId.
+    // 3. Asset references — upsert one per unique asset.
+    //    The source-asset link on a PlaylistItem is `assetRootId`. If it's
+    //    null we fall back to the PlaylistItem _id so the row still has a
+    //    stable handle (rare; happens for ad-hoc website items).
     const seen = new Set<string>();
     let assetsCreated = 0;
     for (const item of items) {
-      if (!item.assetId || seen.has(item.assetId)) continue;
-      seen.add(item.assetId);
-      const title = item.asset?.name?.trim() || `Asset ${item.assetId}`;
-      const type = inferType(item.asset?.type);
+      const assetId = item.assetRootId ?? item._id;
+      if (!assetId || seen.has(assetId)) continue;
+      seen.add(assetId);
+      const title = item.filename?.trim() || `Asset ${assetId}`;
+      const type = inferType(item.type);
       const before = await prisma.assetReference.findUnique({
         where: {
-          clientId_optisignsAssetId: { clientId: input.clientId, optisignsAssetId: item.assetId },
+          clientId_optisignsAssetId: { clientId: input.clientId, optisignsAssetId: assetId },
         },
       });
       await prisma.assetReference.upsert({
         where: {
-          clientId_optisignsAssetId: { clientId: input.clientId, optisignsAssetId: item.assetId },
+          clientId_optisignsAssetId: { clientId: input.clientId, optisignsAssetId: assetId },
         },
         create: {
           clientId: input.clientId,
-          optisignsAssetId: item.assetId,
+          optisignsAssetId: assetId,
           title,
           type,
-          thumbnailUrl: item.asset?.thumbnail ?? null,
+          thumbnailUrl: item.thumbnail ?? null,
+          sourceUrl: item.webLink ?? null,
           status: "APPROVED",
         },
         update: {
           // Only fill blanks — don't clobber admin-edited titles/thumbs.
           title: before?.title?.startsWith("Asset ") ? title : undefined,
           type: before?.type === "UNKNOWN" ? type : undefined,
-          thumbnailUrl: before?.thumbnailUrl ? undefined : item.asset?.thumbnail ?? undefined,
+          thumbnailUrl: before?.thumbnailUrl ? undefined : item.thumbnail ?? undefined,
+          sourceUrl: before?.sourceUrl ? undefined : item.webLink ?? undefined,
         },
       });
       if (!before) assetsCreated++;
@@ -145,17 +153,24 @@ export async function POST(req: NextRequest) {
         optisignsPlaylistId: input.optisignsPlaylistId,
         status: "DRAFT",
         items: {
-          create: items.map((it, idx) => ({
-            clientId: input.clientId,
-            optisignsPlaylistId: input.optisignsPlaylistId,
-            optisignsPlaylistItemId: it._id ?? null,
-            optisignsAssetId: it.assetId,
-            title: it.asset?.name?.trim() || `Asset ${it.assetId}`,
-            type: inferType(it.asset?.type),
-            durationSeconds: typeof it.duration === "number" && it.duration > 0 ? it.duration : 10,
-            sortOrder: idx,
-            status: "ACTIVE",
-          })),
+          create: items
+            .map((it, idx) => {
+              const assetId = it.assetRootId ?? it._id;
+              if (!assetId) return null;
+              return {
+                clientId: input.clientId,
+                optisignsPlaylistId: input.optisignsPlaylistId,
+                optisignsPlaylistItemId: it._id ?? null,
+                optisignsAssetId: assetId,
+                title: it.filename?.trim() || `Asset ${assetId}`,
+                type: inferType(it.type),
+                durationSeconds:
+                  typeof it.duration === "number" && it.duration > 0 ? Math.round(it.duration) : 10,
+                sortOrder: idx,
+                status: "ACTIVE",
+              };
+            })
+            .filter((x): x is NonNullable<typeof x> => x !== null),
         },
       },
       include: { items: true },
@@ -171,7 +186,7 @@ export async function POST(req: NextRequest) {
       after: {
         optisignsPlaylistId: input.optisignsPlaylistId,
         playlistName: remote.name,
-        itemCount: items.length,
+        itemCount: draft.items.length,
         assetsCreated,
       },
     });
@@ -181,7 +196,7 @@ export async function POST(req: NextRequest) {
       playlistName: remote.name ?? null,
       mappingId: mapping.id,
       draftId: draft.id,
-      itemCount: items.length,
+      itemCount: draft.items.length,
       assetsCreated,
       uniqueAssets: seen.size,
     });
