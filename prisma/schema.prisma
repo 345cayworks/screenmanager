@@ -1,0 +1,161 @@
+// Cayworks Display Manager — OptiSigns Client Playlist Portal
+//
+// Default datasource is SQLite for local dev. To deploy on Netlify with
+// Postgres / Neon / Netlify DB, change provider to "postgresql" and update
+// DATABASE_URL accordingly. The schema is provider-agnostic apart from the
+// enum/string handling notes below.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// NOTE: SQLite doesn't support native enums, so we use string fields and
+// validate via TypeScript unions in src/lib/enums.ts. When switching to
+// Postgres you may convert these to native Prisma enums.
+
+model User {
+  id        String   @id @default(cuid())
+  name      String
+  email     String   @unique
+  passwordHash String
+  role      String   // SUPERADMIN | ADMIN | CLIENT_OWNER | CLIENT_EDITOR | VIEWER
+  status    String   @default("ACTIVE") // ACTIVE | INACTIVE
+  clientId  String?
+  client    Client?  @relation(fields: [clientId], references: [id])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  submittedDrafts PlaylistDraft[] @relation("SubmittedBy")
+  approvedDrafts  PlaylistDraft[] @relation("ApprovedBy")
+  auditLogs       AuditLog[]
+
+  @@index([clientId])
+}
+
+model Client {
+  id           String   @id @default(cuid())
+  companyName  String
+  contactName  String?
+  contactEmail String?
+  phone        String?
+  status       String   @default("ACTIVE")           // ACTIVE | INACTIVE | SUSPENDED
+  approvalMode String   @default("REQUIRES_APPROVAL") // AUTO_PUBLISH | REQUIRES_APPROVAL
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  users    User[]
+  mappings OptiSignsMapping[]
+  drafts   PlaylistDraft[]
+  items    PlaylistItem[]
+  assets   AssetReference[]
+  auditLogs AuditLog[]
+}
+
+model OptiSignsMapping {
+  id                    String   @id @default(cuid())
+  clientId              String
+  client                Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  optisignsPlaylistId   String
+  optisignsPlaylistName String?
+  optisignsScreenId     String?
+  optisignsScreenName   String?
+  canPublishDirectly    Boolean  @default(false)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([clientId, optisignsPlaylistId])
+  @@index([clientId])
+}
+
+model PlaylistDraft {
+  id                  String   @id @default(cuid())
+  clientId            String
+  client              Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  optisignsPlaylistId String
+  status              String   @default("DRAFT") // DRAFT | PENDING_APPROVAL | APPROVED | PUBLISHED | REJECTED
+  submittedByUserId   String?
+  submittedBy         User?    @relation("SubmittedBy", fields: [submittedByUserId], references: [id])
+  approvedByUserId    String?
+  approvedBy          User?    @relation("ApprovedBy", fields: [approvedByUserId], references: [id])
+  rejectionReason     String?
+  publishedAt         DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  items PlaylistItem[]
+
+  @@unique([clientId, optisignsPlaylistId, status])
+  @@index([clientId])
+  @@index([status])
+}
+
+model PlaylistItem {
+  id                      String        @id @default(cuid())
+  playlistDraftId         String
+  playlistDraft           PlaylistDraft @relation(fields: [playlistDraftId], references: [id], onDelete: Cascade)
+  clientId                String
+  client                  Client        @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  optisignsPlaylistId     String
+  optisignsPlaylistItemId String?       // null until pushed to OptiSigns
+  optisignsAssetId        String
+  title                   String
+  type                    String        @default("UNKNOWN") // IMAGE | VIDEO | WEBSITE | URL | UNKNOWN
+  durationSeconds         Int           @default(10)
+  sortOrder               Int           @default(0)
+  startDate               DateTime?
+  endDate                 DateTime?
+  status                  String        @default("ACTIVE") // ACTIVE | INACTIVE | EXPIRED
+  createdAt               DateTime      @default(now())
+  updatedAt               DateTime      @updatedAt
+
+  @@index([playlistDraftId])
+  @@index([clientId])
+}
+
+model AssetReference {
+  id               String   @id @default(cuid())
+  clientId         String
+  client           Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
+  optisignsAssetId String
+  title            String
+  type             String   @default("UNKNOWN")
+  thumbnailUrl     String?
+  sourceUrl        String?
+  status           String   @default("APPROVED") // APPROVED | PENDING | REJECTED
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@unique([clientId, optisignsAssetId])
+  @@index([clientId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  clientId   String?
+  client     Client?  @relation(fields: [clientId], references: [id])
+  action     String
+  entityType String
+  entityId   String?
+  beforeData String?  // JSON-stringified snapshot
+  afterData  String?
+  createdAt  DateTime @default(now())
+
+  @@index([clientId])
+  @@index([userId])
+  @@index([entityType, entityId])
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
