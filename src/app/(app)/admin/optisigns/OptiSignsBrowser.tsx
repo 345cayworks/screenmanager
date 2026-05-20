@@ -11,6 +11,7 @@ type RemotePlaylist = {
   name: string | null;
   itemCount: number;
   assignedClient: { id: string; name: string } | null;
+  mappingId: string | null;
 };
 
 type RemoteScreen = {
@@ -61,6 +62,30 @@ export default function OptiSignsBrowser({ clients }: { clients: Client[] }) {
   useEffect(() => {
     refresh();
   }, []);
+
+  async function unassignPlaylist(p: RemotePlaylist) {
+    if (!p.mappingId || !p.assignedClient) return;
+    if (
+      !window.confirm(
+        `Unassign "${p.name || p.optisignsPlaylistId}" from ${p.assignedClient.name}?\n\nThis removes the mapping plus any local drafts for it. Asset references are kept.`
+      )
+    )
+      return;
+    setBusyId(p.optisignsPlaylistId);
+    setError(null);
+    setStatusMsg(null);
+    try {
+      const res = await fetch(`/api/admin/mappings/${p.mappingId}`, { method: "DELETE" });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || "Unassign failed");
+      setStatusMsg(`Unassigned from ${p.assignedClient.name}.`);
+      await refresh();
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unassign failed");
+    }
+    setBusyId(null);
+  }
 
   async function importPlaylist(optisignsPlaylistId: string) {
     const clientId = pickedClient[optisignsPlaylistId];
@@ -180,7 +205,7 @@ export default function OptiSignsBrowser({ clients }: { clients: Client[] }) {
                   {p.assignedClient ? <Badge tone="green">{p.assignedClient.name}</Badge> : <Badge tone="slate">Unassigned</Badge>}
                 </td>
                 <td className="py-2 px-4">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <select
                       value={pickedClient[p.optisignsPlaylistId] ?? p.assignedClient?.id ?? ""}
                       onChange={(e) => setPickedClient({ ...pickedClient, [p.optisignsPlaylistId]: e.target.value })}
@@ -196,6 +221,15 @@ export default function OptiSignsBrowser({ clients }: { clients: Client[] }) {
                     >
                       {busyId === p.optisignsPlaylistId ? "Importing…" : p.assignedClient ? "Re-import" : "Assign + Import"}
                     </button>
+                    {p.assignedClient && p.mappingId && (
+                      <button
+                        onClick={() => unassignPlaylist(p)}
+                        disabled={busyId === p.optisignsPlaylistId}
+                        className="px-3 py-1 text-xs text-red-600 hover:text-red-700 disabled:text-slate-300 font-medium"
+                      >
+                        Unassign
+                      </button>
+                    )}
                   </div>
                 </td>
               </tr>

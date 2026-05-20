@@ -37,6 +37,7 @@ export async function GET() {
           assignedClient: m?.client
             ? { id: m.client.id, name: m.client.companyName }
             : null,
+          mappingId: m?.id ?? null,
         };
       }),
     });
