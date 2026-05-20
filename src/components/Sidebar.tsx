@@ -17,8 +17,7 @@ const CLIENT_LINKS: NavLink[] = [
 
 const ADMIN_LINKS: NavLink[] = [
   { href: "/admin", label: "Admin Dashboard", icon: "✦" },
-  { href: "/admin/clients", label: "Clients", icon: "◉" },
-  { href: "/admin/users", label: "Users", icon: "☻" },
+  { href: "/admin/clients", label: "Clients & Users", icon: "◉" },
   { href: "/admin/approvals", label: "Playlist Approvals", icon: "✓" },
   { href: "/admin/optisigns", label: "OptiSigns Browser", icon: "☁" },
   { href: "/admin/mappings", label: "OptiSigns Mappings", icon: "⇄" },
