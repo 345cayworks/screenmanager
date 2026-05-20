@@ -1,8 +1,12 @@
 import { redirect } from "next/navigation";
 import { readSession } from "@/lib/auth";
+import { ensureSuperAdmin } from "@/lib/bootstrap";
 import LoginForm from "./LoginForm";
 
 export default async function LoginPage() {
+  // First-run bootstrap: if no superadmin exists and SUPER_ADMIN_EMAIL +
+  // SUPERADMIN_MASTER_KEY are set, create the admin. No-op afterwards.
+  await ensureSuperAdmin();
   const s = await readSession();
   if (s) redirect("/dashboard");
   return (
@@ -21,7 +25,9 @@ export default async function LoginPage() {
           <LoginForm />
         </div>
         <p className="text-xs text-slate-400 text-center mt-6">
-          Need access? Contact your account administrator.
+          First time here? Use the setup link your administrator sent you.
+          <br />
+          Forgot your password? Ask your administrator to send a new setup link.
         </p>
       </div>
     </div>

@@ -23,7 +23,8 @@ export async function publishDraft(draftId: string, publishedByUserId: string) {
   if (!draft) throw new Error("Draft not found");
 
   const remote = await Playlists.getPlaylist(draft.optisignsPlaylistId).catch(() => null);
-  const remoteItems = remote?.items ?? [];
+  // OptiSigns puts playlist entries on Playlist.assets (each is a PlaylistItem).
+  const remoteItems = remote?.assets ?? [];
 
   // Items to add: drafts without an optisignsPlaylistItemId
   const toAdd = draft.items.filter((i) => !i.optisignsPlaylistItemId);

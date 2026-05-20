@@ -22,42 +22,53 @@ OptiSigns API key.
 - **JWT-cookie session auth** (`AUTH_SECRET`)
 - **Netlify-friendly** — `netlify.toml` included with the Next.js plugin.
 
-## Getting started
+## Getting started — Netlify + Neon (zero manual steps)
+
+1. **In Netlify**, set these environment variables (Site → Environment):
+
+   | Variable | Value |
+   |---|---|
+   | `DATABASE_URL` | Your Neon Postgres connection string |
+   | `AUTH_SECRET` | `openssl rand -base64 32` |
+   | `OPTISIGNS_API_KEY` | Your OptiSigns API key |
+   | `OPTISIGNS_GRAPHQL_ENDPOINT` | `https://graphql-gateway.optisigns.com/graphql` |
+   | `SUPER_ADMIN_EMAIL` | Your login email |
+   | `SUPERADMIN_MASTER_KEY` | Your login password (min 12 chars) |
+
+2. **Deploy.** The Netlify build runs `prisma db push` automatically and
+   creates every table on Neon.
+
+3. **Visit your site and click "Sign in".** The first time `/login` renders,
+   the app checks whether a `SUPERADMIN` exists; if not, it hashes
+   `SUPERADMIN_MASTER_KEY` with bcrypt and provisions the account from
+   `SUPER_ADMIN_EMAIL`. Subsequent renders are no-ops.
+
+4. **Sign in** with `SUPER_ADMIN_EMAIL` + `SUPERADMIN_MASTER_KEY` (the
+   plaintext value, not the hash). From there, create clients, mappings, and
+   assets in the admin UI.
+
+That's it — no bcrypt CLI, no SQL editor, no `prisma db push` from your
+laptop.
+
+### Rotating the master key
+
+The auto-bootstrap only creates the superadmin when none exists. To change
+the password later: sign in, update your own user via a SQL one-liner, or
+delete the row in the Neon SQL editor and redeploy (the next `/login` render
+will recreate it from the env var).
+
+### Local development (optional)
 
 ```bash
-# 1. Install
-npm install
-
-# 2. Configure environment
 cp .env.example .env
-# Edit .env — at minimum set:
-#   DATABASE_URL           (file:./dev.db for local SQLite)
-#   AUTH_SECRET            (openssl rand -base64 32)
-#   OPTISIGNS_API_KEY      (your real key — never commit)
-#   SUPER_ADMIN_EMAIL      (bootstrap superadmin login)
-#   SUPERADMIN_MASTER_KEY  (bootstrap superadmin password, min 12 chars)
-
-# 3. Initialize the database
-npm run db:push                                # create tables
-SEED_DEMO_DATA=true npm run db:seed            # superadmin + Acme demo
-# (omit SEED_DEMO_DATA to only create the superadmin)
-
-# 4. Run
-npm run dev
+# point DATABASE_URL at a local or Neon dev branch
+npm install
+npm run dev   # build target runs prisma db push for you
 ```
 
-Open <http://localhost:3000> and sign in with `SUPER_ADMIN_EMAIL` /
-`SUPERADMIN_MASTER_KEY`.
-
-When `SEED_DEMO_DATA=true`, two demo client logins are also created (password
-`ChangeMe123!`):
-
-| Email                       | Role          |
-| --------------------------- | ------------- |
-| `owner@acme.example`        | CLIENT_OWNER  |
-| `editor@acme.example`       | CLIENT_EDITOR |
-
-**Change all seeded passwords immediately in any real deployment.**
+The seed script (`SEED_DEMO_DATA=true npm run db:seed`) is still available
+for loading the Acme demo client + two demo users (password `ChangeMe123!`,
+roles `CLIENT_OWNER` / `CLIENT_EDITOR`).
 
 ## Connecting to OptiSigns
 

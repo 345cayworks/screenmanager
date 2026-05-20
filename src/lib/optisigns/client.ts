@@ -20,9 +20,33 @@ export class OptiSignsError extends Error {
   }
 }
 
+/**
+ * Normalize a user-supplied GraphQL endpoint:
+ *  - trim whitespace
+ *  - strip trailing slashes
+ *  - if the URL has no path (or just "/"), append "/graphql"
+ *
+ * This is the difference between getting "Cannot POST /" (Express 404)
+ * and a real GraphQL response.
+ */
+export function normalizeEndpoint(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, "");
+  try {
+    const u = new URL(trimmed);
+    if (u.pathname === "" || u.pathname === "/") {
+      u.pathname = "/graphql";
+    }
+    return u.toString().replace(/\/+$/, "");
+  } catch {
+    return trimmed;
+  }
+}
+
 function getConfig() {
   const apiKey = process.env.OPTISIGNS_API_KEY;
-  const endpoint = process.env.OPTISIGNS_GRAPHQL_ENDPOINT || DEFAULT_ENDPOINT;
+  const endpoint = normalizeEndpoint(
+    process.env.OPTISIGNS_GRAPHQL_ENDPOINT || DEFAULT_ENDPOINT
+  );
   if (!apiKey) {
     throw new OptiSignsError(
       "OPTISIGNS_API_KEY is not set. Configure it in your environment (Netlify env or .env)."
@@ -54,17 +78,32 @@ export async function gqlRequest<T>(
     });
 
     const text = await res.text();
-    let json: GqlResponse<T>;
+    let json: GqlResponse<T> & { message?: string; error?: string } = {};
     try {
       json = JSON.parse(text);
     } catch {
+      // Non-JSON 4xx/5xx from a proxy or load balancer. Surface a snippet.
+      if (!res.ok) {
+        console.error("[optisigns] non-JSON error", res.status, text.slice(0, 500));
+        throw new OptiSignsError(
+          `OptiSigns ${res.status} at ${endpoint}: ${text.slice(0, 200) || res.statusText}`
+        );
+      }
       throw new OptiSignsError(`OptiSigns returned non-JSON (${res.status})`, { body: text.slice(0, 500) });
     }
 
     if (!res.ok) {
-      // Server-side log only. Never echo this back to the client unredacted.
       console.error("[optisigns] HTTP error", res.status, json);
-      throw new OptiSignsError(`OptiSigns HTTP ${res.status}`, json);
+      // Recognize the classic "wrong path" mistake and give a directive hint.
+      if (res.status === 404 && /Cannot POST \//.test(String(json.message ?? ""))) {
+        throw new OptiSignsError(
+          `OptiSigns 404 at ${endpoint} — the URL is reachable but doesn't speak GraphQL at this path. Set OPTISIGNS_GRAPHQL_ENDPOINT to the full path including /graphql (e.g. https://graphql-gateway.optisigns.com/graphql).`,
+          json
+        );
+      }
+      const gqlMsgs = json.errors?.map((e) => e.message).filter(Boolean).join("; ");
+      const upstreamMsg = gqlMsgs || json.message || json.error || `HTTP ${res.status}`;
+      throw new OptiSignsError(`OptiSigns ${res.status} at ${endpoint}: ${upstreamMsg}`, json);
     }
 
     if (json.errors && json.errors.length > 0) {
