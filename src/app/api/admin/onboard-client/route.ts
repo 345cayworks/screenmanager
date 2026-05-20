@@ -74,11 +74,35 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) return fail(400, "Invalid input");
     const { client: cIn, user: uIn, mapping: mIn } = parsed.data;
 
-    // Up-front uniqueness check on the user's email — done BEFORE we create
-    // the client so we don't leave an orphan client row.
+    // Up-front uniqueness checks before we create the client so we don't
+    // leave an orphan client row if a downstream insert collides.
     if (uIn) {
       const existing = await prisma.user.findUnique({ where: { email: uIn.email } });
       if (existing) return fail(409, `A user with email ${uIn.email} already exists`);
+    }
+    if (mIn) {
+      const playlistInUse = await prisma.optiSignsMapping.findUnique({
+        where: { optisignsPlaylistId: mIn.optisignsPlaylistId },
+        include: { client: { select: { companyName: true } } },
+      });
+      if (playlistInUse) {
+        return fail(
+          409,
+          `That OptiSigns playlist is already assigned to ${playlistInUse.client.companyName}. Unassign it from that client first.`
+        );
+      }
+      if (mIn.optisignsScreenId) {
+        const screenInUse = await prisma.optiSignsMapping.findUnique({
+          where: { optisignsScreenId: mIn.optisignsScreenId },
+          include: { client: { select: { companyName: true } } },
+        });
+        if (screenInUse) {
+          return fail(
+            409,
+            `That OptiSigns screen is already linked to ${screenInUse.client.companyName}. Unassign it first.`
+          );
+        }
+      }
     }
 
     const result = await prisma.$transaction(async (tx) => {

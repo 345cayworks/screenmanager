@@ -68,14 +68,21 @@ model OptiSignsMapping {
   id                    String   @id @default(cuid())
   clientId              String
   client                Client   @relation(fields: [clientId], references: [id], onDelete: Cascade)
-  optisignsPlaylistId   String
+  // Each remote playlist may only be assigned to ONE client at a time, so the
+  // playlist id alone is unique across the whole table.
+  optisignsPlaylistId   String   @unique
   optisignsPlaylistName String?
-  optisignsScreenId     String?
+  // Each screen, when set, may only be linked to one client/mapping. In
+  // Postgres, multiple NULLs are still allowed (so several mappings can have
+  // no screen assigned).
+  optisignsScreenId     String?  @unique
   optisignsScreenName   String?
   canPublishDirectly    Boolean  @default(false)
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
+  // Composite kept for upsert-by-(client,playlist) lookups in existing code.
+  // Single-field @unique on optisignsPlaylistId above is the strict constraint.
   @@unique([clientId, optisignsPlaylistId])
   @@index([clientId])
 }
@@ -87,9 +94,9 @@ model PlaylistDraft {
   optisignsPlaylistId String
   status              String   @default("DRAFT") // DRAFT | PENDING_APPROVAL | APPROVED | PUBLISHED | REJECTED
   submittedByUserId   String?
-  submittedBy         User?    @relation("SubmittedBy", fields: [submittedByUserId], references: [id])
+  submittedBy         User?    @relation("SubmittedBy", fields: [submittedByUserId], references: [id], onDelete: SetNull)
   approvedByUserId    String?
-  approvedBy          User?    @relation("ApprovedBy", fields: [approvedByUserId], references: [id])
+  approvedBy          User?    @relation("ApprovedBy", fields: [approvedByUserId], references: [id], onDelete: SetNull)
   rejectionReason     String?
   publishedAt         DateTime?
   createdAt           DateTime @default(now())
@@ -145,9 +152,9 @@ model AssetReference {
 model AuditLog {
   id         String   @id @default(cuid())
   userId     String?
-  user       User?    @relation(fields: [userId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   clientId   String?
-  client     Client?  @relation(fields: [clientId], references: [id])
+  client     Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
   action     String
   entityType String
   entityId   String?

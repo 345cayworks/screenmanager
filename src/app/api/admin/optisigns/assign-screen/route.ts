@@ -39,6 +39,22 @@ export async function POST(req: NextRequest) {
     const client = await prisma.client.findUnique({ where: { id: input.clientId } });
     if (!client) return fail(404, "Client not found");
 
+    // Refuse if this screen is already linked to a different client/mapping.
+    const screenInUse = await prisma.optiSignsMapping.findUnique({
+      where: { optisignsScreenId: input.optisignsScreenId },
+      include: { client: { select: { id: true, companyName: true } } },
+    });
+    if (
+      screenInUse &&
+      (screenInUse.clientId !== input.clientId ||
+        screenInUse.optisignsPlaylistId !== input.optisignsPlaylistId)
+    ) {
+      return fail(
+        409,
+        `That screen is already linked to ${screenInUse.client.companyName}.`
+      );
+    }
+
     const mapping = await prisma.optiSignsMapping.upsert({
       where: {
         clientId_optisignsPlaylistId: {

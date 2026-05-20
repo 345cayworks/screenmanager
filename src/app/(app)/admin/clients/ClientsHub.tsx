@@ -125,6 +125,17 @@ export default function ClientsHub({ currentUserId, clients, users }: Props) {
     if (ok) router.refresh();
   }
 
+  async function deleteUser(u: UserRow) {
+    if (
+      !window.confirm(
+        `Permanently delete ${u.name} (${u.email})?\n\nThis can't be undone. Their historical drafts and audit log entries are preserved but no longer attributed to them.`
+      )
+    )
+      return;
+    const ok = await call(`delete-${u.id}`, `/api/admin/users/${u.id}`, { method: "DELETE" });
+    if (ok) router.refresh();
+  }
+
   async function saveClient(c: ClientRow) {
     const ok = await call(`client-${c.id}`, `/api/admin/clients/${c.id}`, {
       method: "PATCH",
@@ -187,6 +198,7 @@ export default function ClientsHub({ currentUserId, clients, users }: Props) {
           onEdit={(u) => setEditingUser(u)}
           onResend={resendSetup}
           onToggleStatus={(u) => setUserStatus(u, u.status === "ACTIVE" ? "INACTIVE" : "ACTIVE")}
+          onDelete={deleteUser}
           emptyMessage="No admin team members yet."
         />
       </Card>
@@ -240,6 +252,7 @@ export default function ClientsHub({ currentUserId, clients, users }: Props) {
                   onEditUser={(u) => setEditingUser(u)}
                   onResend={resendSetup}
                   onToggleStatus={(u) => setUserStatus(u, u.status === "ACTIVE" ? "INACTIVE" : "ACTIVE")}
+                  onDeleteUser={deleteUser}
                   onInvite={(p) => inviteUser(p)}
                 />
               );
@@ -296,6 +309,7 @@ function FragmentRow(props: {
   onEditUser: (u: UserRow) => void;
   onResend: (u: UserRow) => void;
   onToggleStatus: (u: UserRow) => void;
+  onDeleteUser: (u: UserRow) => void;
   onInvite: (p: { name: string; email: string; role: string; clientId: string | null }) => Promise<boolean>;
 }) {
   const { isOpen, onToggle, client: c, users } = props;
@@ -341,6 +355,7 @@ function FragmentRow(props: {
                   onEdit={props.onEditUser}
                   onResend={props.onResend}
                   onToggleStatus={props.onToggleStatus}
+                  onDelete={props.onDeleteUser}
                   emptyMessage="No users for this client yet. Invite the first one."
                 />
               </div>
@@ -359,6 +374,7 @@ function UserTable(props: {
   onEdit: (u: UserRow) => void;
   onResend: (u: UserRow) => void;
   onToggleStatus: (u: UserRow) => void;
+  onDelete: (u: UserRow) => void;
   emptyMessage: string;
 }) {
   const { users, currentUserId, busy } = props;
@@ -407,13 +423,22 @@ function UserTable(props: {
                 {u.hasPassword ? "Reset password" : "Re-issue link"}
               </button>
               {u.id !== currentUserId && (
-                <button
-                  onClick={() => props.onToggleStatus(u)}
-                  disabled={busy === `status-${u.id}`}
-                  className="text-xs text-slate-600 hover:text-slate-900 font-medium"
-                >
-                  {u.status === "ACTIVE" ? "Deactivate" : "Reactivate"}
-                </button>
+                <>
+                  <button
+                    onClick={() => props.onToggleStatus(u)}
+                    disabled={busy === `status-${u.id}`}
+                    className="text-xs text-slate-600 hover:text-slate-900 font-medium mr-3"
+                  >
+                    {u.status === "ACTIVE" ? "Deactivate" : "Reactivate"}
+                  </button>
+                  <button
+                    onClick={() => props.onDelete(u)}
+                    disabled={busy === `delete-${u.id}`}
+                    className="text-xs text-red-600 hover:text-red-700 disabled:text-slate-300 font-medium"
+                  >
+                    Delete
+                  </button>
+                </>
               )}
             </td>
           </tr>
