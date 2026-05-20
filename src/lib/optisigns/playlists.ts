@@ -72,13 +72,40 @@ const GET_PLAYLIST_MINIMAL = /* GraphQL */ `
   }
 `;
 
-const LIST_PLAYLISTS = /* GraphQL */ `
+// OptiSigns returns `playlists` wrapped in a paginated PlaylistResponse, with
+// the records under `.page`. We try the rich shape first (with `items` so we
+// can show a count) and fall back to a minimal shape if `items` isn't a field
+// on the live Playlist type.
+
+const LIST_PLAYLISTS_RICH = /* GraphQL */ `
+  query ListPlaylists($first: Int) {
+    playlists(first: $first) {
+      page {
+        _id
+        name
+        items { _id }
+      }
+    }
+  }
+`;
+
+const LIST_PLAYLISTS_MIN = /* GraphQL */ `
+  query ListPlaylists($first: Int) {
+    playlists(first: $first) {
+      page {
+        _id
+        name
+      }
+    }
+  }
+`;
+
+const LIST_PLAYLISTS_NO_ARGS = /* GraphQL */ `
   query ListPlaylists {
     playlists {
-      _id
-      name
-      items {
+      page {
         _id
+        name
       }
     }
   }
@@ -91,13 +118,46 @@ export type RemotePlaylistSummary = {
 };
 
 /**
- * Lists every playlist visible to the current OptiSigns account. Used by the
- * admin "browse & assign" UI. May need pagination once the catalog is large —
- * extend the query with `limit` / `offset` when ready.
+ * Lists every playlist visible to the current OptiSigns account.
  */
 export async function listPlaylists(): Promise<RemotePlaylistSummary[]> {
-  const data = await gqlRequest<{ playlists: RemotePlaylistSummary[] | null }>(LIST_PLAYLISTS);
-  return data.playlists ?? [];
+  // Attempt rich shape first.
+  try {
+    const data = await gqlRequest<{ playlists: { page: RemotePlaylistSummary[] } }>(
+      LIST_PLAYLISTS_RICH,
+      { first: 500 }
+    );
+    return data.playlists?.page ?? [];
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "";
+    // Field on Playlist doesn't exist — try without items.
+    if (/items|field/i.test(msg)) {
+      try {
+        const data = await gqlRequest<{ playlists: { page: RemotePlaylistSummary[] } }>(
+          LIST_PLAYLISTS_MIN,
+          { first: 500 }
+        );
+        return data.playlists?.page ?? [];
+      } catch (err2) {
+        const msg2 = err2 instanceof Error ? err2.message : "";
+        if (/\$first|argument/i.test(msg2)) {
+          const data = await gqlRequest<{ playlists: { page: RemotePlaylistSummary[] } }>(
+            LIST_PLAYLISTS_NO_ARGS
+          );
+          return data.playlists?.page ?? [];
+        }
+        throw err2;
+      }
+    }
+    // Args not supported — try no-args version.
+    if (/\$first|argument/i.test(msg)) {
+      const data = await gqlRequest<{ playlists: { page: RemotePlaylistSummary[] } }>(
+        LIST_PLAYLISTS_NO_ARGS
+      );
+      return data.playlists?.page ?? [];
+    }
+    throw err;
+  }
 }
 
 export async function getPlaylist(playlistId: string): Promise<RemotePlaylist | null> {
