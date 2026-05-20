@@ -30,23 +30,30 @@ npm install
 
 # 2. Configure environment
 cp .env.example .env
-# Edit .env:
-#   AUTH_SECRET=  (run: openssl rand -base64 32)
-#   OPTISIGNS_API_KEY=  (your real key — never commit)
+# Edit .env — at minimum set:
+#   DATABASE_URL           (file:./dev.db for local SQLite)
+#   AUTH_SECRET            (openssl rand -base64 32)
+#   OPTISIGNS_API_KEY      (your real key — never commit)
+#   SUPER_ADMIN_EMAIL      (bootstrap superadmin login)
+#   SUPERADMIN_MASTER_KEY  (bootstrap superadmin password, min 12 chars)
 
 # 3. Initialize the database
-npm run db:push      # create tables (SQLite by default)
-npm run db:seed      # add demo client + users
+npm run db:push                                # create tables
+SEED_DEMO_DATA=true npm run db:seed            # superadmin + Acme demo
+# (omit SEED_DEMO_DATA to only create the superadmin)
 
 # 4. Run
 npm run dev
 ```
 
-Open <http://localhost:3000>. Seeded logins (password `ChangeMe123!`):
+Open <http://localhost:3000> and sign in with `SUPER_ADMIN_EMAIL` /
+`SUPERADMIN_MASTER_KEY`.
+
+When `SEED_DEMO_DATA=true`, two demo client logins are also created (password
+`ChangeMe123!`):
 
 | Email                       | Role          |
 | --------------------------- | ------------- |
-| `admin@cayworks.example`    | SUPERADMIN    |
 | `owner@acme.example`        | CLIENT_OWNER  |
 | `editor@acme.example`       | CLIENT_EDITOR |
 

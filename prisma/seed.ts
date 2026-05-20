@@ -1,8 +1,17 @@
 /**
- * Seed script — populates the database with example users, a client, OptiSigns
- * mappings, asset references, and a starter draft so the UI has data to show.
+ * Seed script — provisions the SUPERADMIN account from environment variables
+ * and (optionally) loads demo client/user/mapping/asset data so the UI has
+ * something to render.
  *
- * Run:    npm run db:seed
+ * Required env vars:
+ *   SUPER_ADMIN_EMAIL      — email for the bootstrap superadmin account
+ *   SUPERADMIN_MASTER_KEY  — the plaintext password (bcrypt-hashed at rest)
+ *
+ * Optional env vars:
+ *   SUPER_ADMIN_NAME       — display name (default: "Super Admin")
+ *   SEED_DEMO_DATA         — set to "true" to also create the Acme demo data
+ *
+ * Run:  npm run db:seed
  */
 
 import { PrismaClient } from "@prisma/client";
@@ -10,10 +19,37 @@ import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 
-async function main() {
-  const passwordHash = await bcrypt.hash("ChangeMe123!", 10);
+function requireEnv(name: string): string {
+  const v = process.env[name];
+  if (!v || !v.trim()) {
+    console.error(`✗ Missing required env var: ${name}`);
+    process.exit(1);
+  }
+  return v.trim();
+}
 
-  // 1. Demo client
+async function seedSuperAdmin() {
+  const email = requireEnv("SUPER_ADMIN_EMAIL").toLowerCase();
+  const masterKey = requireEnv("SUPERADMIN_MASTER_KEY");
+  const name = process.env.SUPER_ADMIN_NAME?.trim() || "Super Admin";
+
+  if (masterKey.length < 12) {
+    console.error("✗ SUPERADMIN_MASTER_KEY must be at least 12 characters.");
+    process.exit(1);
+  }
+
+  const passwordHash = await bcrypt.hash(masterKey, 10);
+
+  const user = await prisma.user.upsert({
+    where: { email },
+    update: { passwordHash, role: "SUPERADMIN", status: "ACTIVE", name },
+    create: { email, passwordHash, role: "SUPERADMIN", status: "ACTIVE", name },
+  });
+
+  console.log(`✓ SUPERADMIN ready: ${user.email}`);
+}
+
+async function seedDemoData() {
   const acme = await prisma.client.upsert({
     where: { id: "seed-client-acme" },
     update: {},
@@ -27,17 +63,7 @@ async function main() {
     },
   });
 
-  // 2. Users
-  await prisma.user.upsert({
-    where: { email: "admin@cayworks.example" },
-    update: {},
-    create: {
-      name: "Super Admin",
-      email: "admin@cayworks.example",
-      passwordHash,
-      role: "SUPERADMIN",
-    },
-  });
+  const demoHash = await bcrypt.hash("ChangeMe123!", 10);
 
   await prisma.user.upsert({
     where: { email: "owner@acme.example" },
@@ -45,7 +71,7 @@ async function main() {
     create: {
       name: "Acme Owner",
       email: "owner@acme.example",
-      passwordHash,
+      passwordHash: demoHash,
       role: "CLIENT_OWNER",
       clientId: acme.id,
     },
@@ -57,13 +83,12 @@ async function main() {
     create: {
       name: "Acme Editor",
       email: "editor@acme.example",
-      passwordHash,
+      passwordHash: demoHash,
       role: "CLIENT_EDITOR",
       clientId: acme.id,
     },
   });
 
-  // 3. OptiSigns mapping (placeholder IDs — replace with real ones in admin UI)
   await prisma.optiSignsMapping.upsert({
     where: {
       clientId_optisignsPlaylistId: {
@@ -82,7 +107,6 @@ async function main() {
     },
   });
 
-  // 4. Asset references
   const assets = [
     { id: "demo-asset-promo", title: "Spring Promo Banner", type: "IMAGE" },
     { id: "demo-asset-menu", title: "Daily Menu Video", type: "VIDEO" },
@@ -102,10 +126,22 @@ async function main() {
     });
   }
 
+  console.log("✓ Demo data loaded (Acme client + 2 users + 1 mapping + 3 assets)");
+  console.log("  Demo logins (password: ChangeMe123!):");
+  console.log("    owner@acme.example     CLIENT_OWNER");
+  console.log("    editor@acme.example    CLIENT_EDITOR");
+}
+
+async function main() {
+  await seedSuperAdmin();
+
+  if (process.env.SEED_DEMO_DATA === "true") {
+    await seedDemoData();
+  } else {
+    console.log("· Skipping demo data (set SEED_DEMO_DATA=true to include it).");
+  }
+
   console.log("✓ Seed complete");
-  console.log("  Login: admin@cayworks.example / ChangeMe123!");
-  console.log("  Login: owner@acme.example     / ChangeMe123!");
-  console.log("  Login: editor@acme.example    / ChangeMe123!");
 }
 
 main()
