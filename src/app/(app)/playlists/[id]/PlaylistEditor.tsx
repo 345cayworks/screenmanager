@@ -39,9 +39,17 @@ type Props = {
   draft: { id: string; status: string; items: Item[] };
   assets: Asset[];
   autoImportError?: string | null;
+  localOnly?: boolean;
 };
 
-export default function PlaylistEditor({ session, mapping, draft, assets, autoImportError }: Props) {
+export default function PlaylistEditor({
+  session,
+  mapping,
+  draft,
+  assets,
+  autoImportError,
+  localOnly,
+}: Props) {
   const router = useRouter();
   const [items, setItems] = useState<Item[]>(draft.items);
   const [dirty, setDirty] = useState(false);
@@ -285,7 +293,7 @@ export default function PlaylistEditor({ session, mapping, draft, assets, autoIm
             >
               {busy === "submit" ? "Submitting…" : "Submit for approval"}
             </button>
-            {canDirectPublish && (
+            {canDirectPublish && !localOnly && (
               <button
                 onClick={publishDirect}
                 disabled={isViewer || busy !== null || draft.status === "PUBLISHED"}
@@ -294,15 +302,22 @@ export default function PlaylistEditor({ session, mapping, draft, assets, autoIm
                 {busy === "publish" ? "Publishing…" : "Publish to OptiSigns"}
               </button>
             )}
-            <button
-              onClick={pullFromOptiSigns}
-              disabled={isLocked || isViewer || busy !== null}
-              title="Replace the current draft with the live OptiSigns playlist contents"
-              className="ml-auto px-4 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg font-medium disabled:opacity-50"
-            >
-              {busy === "pull" ? "Pulling…" : "⟳ Pull latest from OptiSigns"}
-            </button>
+            {!localOnly && (
+              <button
+                onClick={pullFromOptiSigns}
+                disabled={isLocked || isViewer || busy !== null}
+                title="Replace the current draft with the live OptiSigns playlist contents"
+                className="ml-auto px-4 py-2 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 text-sm rounded-lg font-medium disabled:opacity-50"
+              >
+                {busy === "pull" ? "Pulling…" : "⟳ Pull latest from OptiSigns"}
+              </button>
+            )}
           </div>
+          {localOnly && (
+            <p className="mt-3 text-xs text-slate-500">
+              Local-only mode: submitted drafts are reviewed here. An admin manually mirrors approved changes into OptiSigns.
+            </p>
+          )}
         </div>
 
         {/* Assets column */}

@@ -28,15 +28,20 @@ const ADMIN_LINKS: NavLink[] = [
 
 export default function Sidebar({
   user,
+  localOnly = false,
 }: {
   user: { name: string; email: string; role: Role; clientId: string | null };
+  localOnly?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const isAdmin = user.role === "SUPERADMIN" || user.role === "ADMIN";
-  const links = isAdmin ? ADMIN_LINKS : CLIENT_LINKS;
+  let links = isAdmin ? ADMIN_LINKS : CLIENT_LINKS;
+  if (localOnly) {
+    links = links.filter((l) => l.href !== "/admin/optisigns");
+  }
 
   async function logout() {
     await fetch("/api/auth/logout", { method: "POST" });
@@ -56,6 +61,11 @@ export default function Sidebar({
             <div className="text-xs text-slate-500 leading-tight">Display Manager</div>
           </div>
         </div>
+        {localOnly && (
+          <div className="mt-3 text-[10px] font-semibold uppercase tracking-wide text-amber-700 bg-amber-50 border border-amber-200 px-2 py-1 rounded text-center">
+            Local-only mode
+          </div>
+        )}
       </div>
 
       <nav className="flex-1 px-3 py-4 space-y-0.5">

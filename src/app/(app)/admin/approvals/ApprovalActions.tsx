@@ -3,7 +3,13 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-export default function ApprovalActions({ playlistId }: { playlistId: string }) {
+export default function ApprovalActions({
+  playlistId,
+  localOnly = false,
+}: {
+  playlistId: string;
+  localOnly?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -33,7 +39,7 @@ export default function ApprovalActions({ playlistId }: { playlistId: string }) 
         disabled={busy !== null}
         className="px-3 py-1.5 text-sm bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium"
       >
-        {busy?.endsWith("/approve") ? "Approving…" : "Approve & Publish"}
+        {busy?.endsWith("/approve") ? "Approving…" : localOnly ? "Approve" : "Approve & Publish"}
       </button>
       <input
         value={reason}

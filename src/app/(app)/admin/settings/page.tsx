@@ -3,11 +3,17 @@ import { redirect } from "next/navigation";
 import { isAdminRole } from "@/lib/enums";
 import { Card, PageHeader } from "@/components/ui";
 import ConnectionCheck from "./ConnectionCheck";
+import OperatingModeToggle from "./OperatingModeToggle";
+import { isLocalOnly } from "@/lib/settings";
+
+export const dynamic = "force-dynamic";
 
 export default async function SettingsPage() {
   const session = await readSession();
   if (!session) redirect("/login");
   if (!isAdminRole(session.role)) redirect("/dashboard");
+
+  const localOnly = await isLocalOnly();
 
   const envConfigured = {
     OPTISIGNS_API_KEY: !!process.env.OPTISIGNS_API_KEY,
@@ -17,8 +23,14 @@ export default async function SettingsPage() {
   };
 
   return (
-    <div>
+    <div className="space-y-6">
       <PageHeader title="Settings" subtitle="System configuration & integration status." />
+
+      <Card className="p-6">
+        <h2 className="font-semibold text-slate-900 mb-3">Operating mode</h2>
+        <OperatingModeToggle initialLocal={localOnly} />
+      </Card>
+
       <Card className="p-6">
         <h2 className="font-semibold text-slate-900 mb-3">Environment</h2>
         <dl className="grid grid-cols-2 gap-y-2 text-sm">
@@ -34,7 +46,7 @@ export default async function SettingsPage() {
         <p className="text-xs text-slate-500 mt-4">
           Configure these in Netlify environment variables (or .env locally). API key values are never displayed.
         </p>
-        <ConnectionCheck />
+        {!localOnly && <ConnectionCheck />}
       </Card>
     </div>
   );

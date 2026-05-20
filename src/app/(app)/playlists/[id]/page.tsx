@@ -4,10 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { isAdminRole } from "@/lib/enums";
 import PlaylistEditor from "./PlaylistEditor";
 import { importPlaylistFromOptiSigns } from "@/lib/import-playlist";
+import { isLocalOnly } from "@/lib/settings";
 
 export const dynamic = "force-dynamic";
 
 export default async function PlaylistPage({ params }: { params: { id: string } }) {
+  const localOnly = await isLocalOnly();
   const session = await readSession();
   if (!session) redirect("/login");
 
@@ -33,24 +35,26 @@ export default async function PlaylistPage({ params }: { params: { id: string } 
     include: { items: { orderBy: { sortOrder: "asc" } } },
   });
 
-  // First open: no DRAFT yet. Try to seed it from the live OptiSigns playlist
-  // so the client lands on the real content instead of an empty list. If
-  // OptiSigns errors (network / schema mismatch) we fall back to an empty
-  // DRAFT so the editor still loads.
+  // First open: no DRAFT yet. In API mode, seed it from the live OptiSigns
+  // playlist so the client lands on the real content. In local-only mode we
+  // skip the network call and just create an empty DRAFT — assets are
+  // managed manually.
   let autoImportError: string | null = null;
   if (!draft) {
-    try {
-      const r = await importPlaylistFromOptiSigns({
-        clientId: mapping.clientId,
-        optisignsPlaylistId,
-        byUserId: session.userId,
-      });
-      draft = await prisma.playlistDraft.findUnique({
-        where: { id: r.draftId },
-        include: { items: { orderBy: { sortOrder: "asc" } } },
-      });
-    } catch (err) {
-      autoImportError = err instanceof Error ? err.message : "OptiSigns import failed";
+    if (!localOnly) {
+      try {
+        const r = await importPlaylistFromOptiSigns({
+          clientId: mapping.clientId,
+          optisignsPlaylistId,
+          byUserId: session.userId,
+        });
+        draft = await prisma.playlistDraft.findUnique({
+          where: { id: r.draftId },
+          include: { items: { orderBy: { sortOrder: "asc" } } },
+        });
+      } catch (err) {
+        autoImportError = err instanceof Error ? err.message : "OptiSigns import failed";
+      }
     }
     if (!draft) {
       draft = await prisma.playlistDraft.create({
@@ -104,6 +108,7 @@ export default async function PlaylistPage({ params }: { params: { id: string } 
         thumbnailUrl: a.thumbnailUrl,
       }))}
       autoImportError={autoImportError}
+      localOnly={localOnly}
     />
   );
 }

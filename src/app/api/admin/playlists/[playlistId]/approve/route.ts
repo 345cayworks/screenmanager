@@ -1,18 +1,27 @@
+// POST /api/admin/playlists/:playlistId/approve
+//
+// Approves a PENDING_APPROVAL draft.
+//   - In API mode (default): immediately tries to push the changes to
+//     OptiSigns and mark the draft PUBLISHED. On failure, rolls back to
+//     PENDING_APPROVAL so the admin can retry.
+//   - In local-only mode: just transitions the draft to APPROVED and
+//     returns a change report the admin will mirror into OptiSigns
+//     manually. The admin then hits /mark-published to close the loop.
+
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireAdmin } from "@/lib/rbac";
 import { audit } from "@/lib/audit";
 import { fail, handle, ok } from "@/lib/http";
 import { publishDraft } from "@/lib/publish";
+import { isLocalOnly } from "@/lib/settings";
+import { buildChangeReport } from "@/lib/change-report";
 
-/**
- * Approve a PENDING_APPROVAL draft AND publish it to OptiSigns.
- * We intentionally combine approval + publish — there is no benefit to an
- * "approved but unpublished" state in the MVP.
- */
 export async function POST(_req: NextRequest, { params }: { params: { playlistId: string } }) {
   return handle(async () => {
     const session = await requireAdmin();
+    const localOnly = await isLocalOnly();
+
     const draft = await prisma.playlistDraft.findFirst({
       where: { optisignsPlaylistId: params.playlistId, status: "PENDING_APPROVAL" },
     });
@@ -30,11 +39,15 @@ export async function POST(_req: NextRequest, { params }: { params: { playlistId
       entityId: draft.id,
     });
 
+    if (localOnly) {
+      const report = await buildChangeReport(draft.id);
+      return ok({ ok: true, status: "APPROVED", mode: "local", report });
+    }
+
     try {
       const published = await publishDraft(draft.id, session.userId);
-      return ok({ ok: true, status: published.status });
+      return ok({ ok: true, status: published.status, mode: "api" });
     } catch (err) {
-      // Roll back to PENDING_APPROVAL so the admin can retry.
       await prisma.playlistDraft.update({
         where: { id: draft.id },
         data: { status: "PENDING_APPROVAL" },
